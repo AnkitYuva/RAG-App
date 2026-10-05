@@ -441,6 +441,6 @@ if __name__ == "__main__":
     app.launch(
         server_name=server_host,
         server_port=server_port,
-        share=False,
+        share=bool(os.getenv("SPACE_ID")),
         inbrowser=False,
     )
