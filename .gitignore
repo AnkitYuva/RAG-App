@@ -1,0 +1,33 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# .gitignore
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Environment variables (contains API keys – NEVER commit this)
+.env
+
+# Python bytecode
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# FAISS vector store (can be regenerated)
+vectorstore/
+
+# Runtime uploaded documents (preserve sample documents for deployment)
+data/*
+!data/sample_documents/
+!data/sample_documents/*
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+
+# OS files
+.DS_Store
+Thumbs.db
