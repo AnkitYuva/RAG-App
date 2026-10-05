@@ -204,13 +204,19 @@ def _get_embedding_model(api_key: Optional[str] = None):
         except Exception:
             pass
 
-    # Offline fallback – sentence-transformers runs on CPU without any credentials
-    from langchain_community.embeddings import HuggingFaceEmbeddings
-    return HuggingFaceEmbeddings(
-        model_name="sentence-transformers/all-MiniLM-L6-v2",
-        model_kwargs={"device": "cpu"},
-        encode_kwargs={"normalize_embeddings": True},
-    )
+    # Local development fallback: available only when sentence-transformers is installed.
+    try:
+        from langchain_community.embeddings import HuggingFaceEmbeddings
+        return HuggingFaceEmbeddings(
+            model_name="sentence-transformers/all-MiniLM-L6-v2",
+            model_kwargs={"device": "cpu"},
+            encode_kwargs={"normalize_embeddings": True},
+        )
+    except ImportError as exc:
+        raise RuntimeError(
+            "No embedding model is available. Add GOOGLE_API_KEY in Hugging Face "
+            "Space secrets, or install sentence-transformers for local offline use."
+        ) from exc
 
 
 def _get_llm(api_key: Optional[str] = None, provider_override: Optional[str] = None):

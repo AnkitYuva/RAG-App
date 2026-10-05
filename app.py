@@ -251,10 +251,10 @@ Upload PDF, text, or Markdown files. Ask questions and get answers grounded in t
         with gr.Accordion("⚙️ Model, API & Chunking Configuration", open=False):
             with gr.Row():
                 provider_dropdown = gr.Dropdown(
-                    choices=["Auto-detect", "Google Gemini", "NVIDIA Nemotron", "OpenAI", "Groq", "Ollama"],
+                    choices=["Auto-detect", "Google Gemini"],
                     value="Auto-detect",
                     label="LLM Provider",
-                    info="Auto-detect reads your pasted key or .env variables; choose a provider to force one backend.",
+                    info="Use Auto-detect or Google Gemini with GOOGLE_API_KEY.",
                 )
                 api_key_input = gr.Textbox(
                     label="API Key (optional if configured in .env)",

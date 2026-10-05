@@ -10,10 +10,8 @@ gradio>=4.29.0
 langchain>=0.2.0
 langchain-community>=0.2.0
 
-# ── LLM Providers (install the one matching your API key) ───────────────────
+# ── LLM Provider for deployment ─────────────────────────────────────────────
 langchain-google-genai>=1.0.0        # Google Gemini  (GOOGLE_API_KEY)
-langchain-openai>=0.1.0              # OpenAI GPT     (OPENAI_API_KEY)
-langchain-groq>=0.1.0                # Groq LLaMA     (GROQ_API_KEY)
 
 # ── PDF Loading ──────────────────────────────────────────────────────────────
 pypdf>=4.2.0
@@ -22,7 +20,6 @@ pypdf>=4.2.0
 faiss-cpu>=1.8.0
 
 # ── Embeddings ──────────────────────────────────────────────────────────────
-sentence-transformers>=2.7.0         # HuggingFace offline embeddings (fallback)
 google-generativeai>=0.5.0           # Required by langchain-google-genai
 
 # ── Utilities ───────────────────────────────────────────────────────────────
