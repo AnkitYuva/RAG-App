@@ -7,7 +7,7 @@ sdk: gradio
 sdk_version: 5.49.1
 app_file: app.py
 pinned: false
-suggested_hardware: cpu-basic
+suggested_hardware: zero-gpu
 ---
 
 # 📚 Ask My Documents – RAG Assistant & Prompt Engineering System

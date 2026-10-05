@@ -24,6 +24,13 @@ load_dotenv()
 import document_processor as dp
 import rag_engine as rag
 
+try:
+    import spaces
+    zero_gpu = spaces.GPU
+except Exception:
+    def zero_gpu(fn):
+        return fn
+
 
 def get_default_api_key() -> str:
     """Get any pre-configured API key from environment."""
@@ -35,6 +42,7 @@ def get_default_api_key() -> str:
     )
 
 
+@zero_gpu
 def process_documents(uploaded_files, chunk_size: int = 800, chunk_overlap: int = 150, api_key: str = "") -> tuple:
     """
     Called when the user clicks 'Process Documents'.
@@ -92,6 +100,7 @@ def process_documents(uploaded_files, chunk_size: int = 800, chunk_overlap: int 
         )
 
 
+@zero_gpu
 def load_sample_document() -> tuple:
     """Loads the pre-packaged sample syllabus PDF for instant 1-click testing."""
     sample_path = os.path.abspath("data/sample_documents/AI_Course_Syllabus.pdf")
@@ -124,6 +133,7 @@ def load_sample_document() -> tuple:
         )
 
 
+@zero_gpu
 def ask_question(
     question: str,
     docs_ready: bool,
