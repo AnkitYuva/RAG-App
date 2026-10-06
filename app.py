@@ -226,6 +226,34 @@ def call_gemini(prompt: str, api_key: str) -> str:
     return (response.text or "").strip()
 
 
+def offline_answer(question: str, sources: List[Dict], error_text: str) -> str:
+    """Fallback answer for demos when the Gemini key is missing or invalid."""
+    if "API_KEY_INVALID" in error_text or "API key not valid" in error_text:
+        reason = "The Google API key is invalid."
+    elif "Missing GOOGLE_API_KEY" in error_text:
+        reason = "No Google API key was provided."
+    else:
+        reason = "Gemini could not generate a response."
+
+    if not sources:
+        return f"{reason}\n\nNo document sources were retrieved."
+
+    best = sources[0]
+    snippet = best["text"][:900]
+    if len(best["text"]) > 900:
+        snippet += "..."
+
+    return (
+        f"{reason}\n\n"
+        "**Offline demo answer from retrieved context:**\n\n"
+        f"The most relevant uploaded document content is from `{best['source']}`, "
+        f"page {best['page']} [Source 1, Page {best['page']}].\n\n"
+        f"> {snippet}\n\n"
+        "For full AI-generated answering, paste a valid Google Gemini API key in "
+        "Settings or set `GOOGLE_API_KEY` before starting the app."
+    )
+
+
 def format_sources(sources: List[Dict]) -> str:
     if not sources:
         return "No sources retrieved."
@@ -256,10 +284,13 @@ def ask_question(question: str, index, api_key: str, top_k: int):
     try:
         sources = retrieve(question.strip(), index, int(top_k))
         prompt = build_prompt(question.strip(), sources)
-        answer = call_gemini(prompt, api_key)
+        try:
+            answer = call_gemini(prompt, api_key)
+        except Exception as exc:
+            answer = offline_answer(question.strip(), sources, str(exc))
         return answer, format_sources(sources), prompt
     except Exception:
-        return f"Answer generation failed:\n\n```\n{traceback.format_exc()}\n```", "", ""
+        return f"Retrieval failed:\n\n```\n{traceback.format_exc()}\n```", "", ""
 
 
 def clear_all():
