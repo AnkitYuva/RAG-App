@@ -15,11 +15,11 @@ Use these cells in Colab.
 !pip install -r requirements.txt
 ```
 
-## 3. Add your Gemini API key
+## 3. Add your OpenRouter API key
 
 ```python
 import os
-os.environ["GOOGLE_API_KEY"] = "PASTE_YOUR_GOOGLE_API_KEY_HERE"
+os.environ["OPENROUTER_API_KEY"] = "PASTE_YOUR_OPENROUTER_API_KEY_HERE"
 ```
 
 ## 4. Run the Gradio app

@@ -10,14 +10,16 @@ Run in Colab:
 """
 
 import hashlib
+import json
 import math
 import os
 import re
 import traceback
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 from pathlib import Path
 from typing import Dict, List
 
-import google.generativeai as genai
 import gradio as gr
 from dotenv import load_dotenv
 from pypdf import PdfReader
@@ -41,7 +43,7 @@ EMBED_DIMS = 4096
 
 
 def get_default_api_key() -> str:
-    return os.getenv("GOOGLE_API_KEY", "")
+    return os.getenv("OPENROUTER_API_KEY", "")
 
 
 def read_file_text(path: str) -> List[Dict]:
@@ -212,28 +214,60 @@ QUESTION:
 ANSWER:"""
 
 
-def call_gemini(prompt: str, api_key: str) -> str:
-    key = (api_key or os.getenv("GOOGLE_API_KEY", "")).strip()
+def call_openrouter(prompt: str, api_key: str) -> str:
+    key = (api_key or os.getenv("OPENROUTER_API_KEY", "")).strip()
     if not key:
         raise RuntimeError(
-            "Missing GOOGLE_API_KEY. Add it in the API key box, Colab secrets, .env, "
+            "Missing OPENROUTER_API_KEY. Add it in the API key box, Colab secrets, .env, "
             "or Hugging Face Space secrets."
         )
 
-    genai.configure(api_key=key)
-    model = genai.GenerativeModel("gemini-1.5-flash")
-    response = model.generate_content(prompt)
-    return (response.text or "").strip()
+    payload = json.dumps(
+        {
+            "model": "openrouter/free",
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.2,
+        }
+    ).encode("utf-8")
+    request = Request(
+        "https://openrouter.ai/api/v1/chat/completions",
+        data=payload,
+        headers={
+            "Authorization": f"Bearer {key}",
+            "Content-Type": "application/json",
+            "HTTP-Referer": "http://localhost:7860",
+            "X-Title": "Ask My Documents RAG Assistant",
+        },
+        method="POST",
+    )
+    try:
+        with urlopen(request, timeout=20) as response:
+            result = json.loads(response.read().decode("utf-8"))
+    except HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="ignore")[:500]
+        raise RuntimeError(f"OpenRouter request failed ({exc.code}): {detail}") from exc
+    except URLError as exc:
+        raise RuntimeError(f"Could not connect to OpenRouter: {exc.reason}") from exc
+
+    content = result.get("choices", [{}])[0].get("message", {}).get("content", "")
+    if not content:
+        raise RuntimeError(f"OpenRouter returned no answer: {result}")
+    return content.strip()
 
 
 def offline_answer(question: str, sources: List[Dict], error_text: str) -> str:
     """Fallback answer for demos when the Gemini key is missing or invalid."""
-    if "API_KEY_INVALID" in error_text or "API key not valid" in error_text:
-        reason = "The Google API key is invalid."
-    elif "Missing GOOGLE_API_KEY" in error_text:
-        reason = "No Google API key was provided."
+    if "401" in error_text or "403" in error_text or "Invalid API key" in error_text:
+        reason = "The OpenRouter API key is invalid or has no access."
+    elif "Missing OPENROUTER_API_KEY" in error_text:
+        reason = "No OpenRouter API key was provided."
+    elif "404" in error_text or "not found" in error_text.lower():
+        reason = "The selected OpenRouter model is unavailable."
+    elif "429" in error_text or "quota" in error_text.lower():
+        reason = "OpenRouter API quota or rate limit is currently exhausted."
     else:
-        reason = "Gemini could not generate a response."
+        detail = error_text.strip().replace("\n", " ")[:260]
+        reason = f"OpenRouter could not generate a response. {detail}" if detail else "OpenRouter could not generate a response."
 
     if not sources:
         return f"{reason}\n\nNo document sources were retrieved."
@@ -249,8 +283,8 @@ def offline_answer(question: str, sources: List[Dict], error_text: str) -> str:
         f"The most relevant uploaded document content is from `{best['source']}`, "
         f"page {best['page']} [Source 1, Page {best['page']}].\n\n"
         f"> {snippet}\n\n"
-        "For full AI-generated answering, paste a valid Google Gemini API key in "
-        "Settings or set `GOOGLE_API_KEY` before starting the app."
+        "For full AI-generated answering, paste a valid OpenRouter API key in "
+        "Settings or set `OPENROUTER_API_KEY` before starting the app."
     )
 
 
@@ -285,7 +319,7 @@ def ask_question(question: str, index, api_key: str, top_k: int):
         sources = retrieve(question.strip(), index, int(top_k))
         prompt = build_prompt(question.strip(), sources)
         try:
-            answer = call_gemini(prompt, api_key)
+            answer = call_openrouter(prompt, api_key)
         except Exception as exc:
             answer = offline_answer(question.strip(), sources, str(exc))
         return answer, format_sources(sources), prompt
@@ -310,10 +344,10 @@ Upload documents, process them, ask questions, and get grounded answers with sou
 
         with gr.Accordion("Settings", open=False):
             api_key = gr.Textbox(
-                label="Google API Key",
+                label="OpenRouter API Key",
                 type="password",
                 value=get_default_api_key(),
-                placeholder="Leave blank if GOOGLE_API_KEY is already configured",
+                placeholder="Leave blank if OPENROUTER_API_KEY is already configured",
             )
             with gr.Row():
                 chunk_size = gr.Slider(300, 1500, value=CHUNK_SIZE, step=50, label="Chunk Size")
