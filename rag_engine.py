@@ -15,7 +15,10 @@ CONCEPTS EXPLAINED:
   - Strict Prompt  : Instructs LLM to answer ONLY from context, avoiding hallucinations.
 """
 
+import hashlib
+import math
 import os
+import re
 from typing import List, Tuple, Optional
 from dotenv import load_dotenv
 
@@ -30,6 +33,11 @@ try:
 except ImportError:
     from langchain.prompts import PromptTemplate
 
+try:
+    from langchain_core.embeddings import Embeddings
+except ImportError:
+    from langchain.embeddings.base import Embeddings
+
 from langchain_community.vectorstores import FAISS
 
 # Load environment variables from .env file
@@ -37,6 +45,38 @@ load_dotenv()
 
 # Number of relevant chunks retrieved per question
 TOP_K = 4
+
+
+class HashEmbeddings(Embeddings):
+    """Small local embedding model for reliable PDF indexing on free Spaces."""
+
+    def __init__(self, dimensions: int = 4096):
+        self.dimensions = dimensions
+
+    def _embed(self, text: str) -> List[float]:
+        vector = [0.0] * self.dimensions
+        tokens = [
+            token
+            for token in re.findall(r"[A-Za-z0-9]+", text.lower())
+            if len(token) > 2
+        ]
+
+        for token in tokens:
+            digest = hashlib.sha256(token.encode("utf-8")).digest()
+            index = int.from_bytes(digest[:4], "little") % self.dimensions
+            sign = 1.0 if digest[4] % 2 == 0 else -1.0
+            vector[index] += sign
+
+        norm = math.sqrt(sum(value * value for value in vector))
+        if norm:
+            vector = [value / norm for value in vector]
+        return vector
+
+    def embed_documents(self, texts: List[str]) -> List[List[float]]:
+        return [self._embed(text) for text in texts]
+
+    def embed_query(self, text: str) -> List[float]:
+        return self._embed(text)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # EXERCISE 2: PROFESSIONAL PROMPT DESIGN
@@ -182,34 +222,10 @@ def _is_valid_key(key: Optional[str]) -> bool:
 def _get_embedding_model(api_key: Optional[str] = None):
     """
     Return the embedding model.
-    Priority:
-      1. Google Generative AI Embeddings (if valid GOOGLE_API_KEY available)
-      2. HuggingFace sentence-transformers (offline, free, no API key needed)
+    Uses a local hash-based embedder for reliable free-tier deployment.
+    The LLM API key is still used later for answer generation.
     """
-    google_key = api_key if _is_valid_key(api_key) else os.getenv("GOOGLE_API_KEY")
-    if _is_valid_key(google_key):
-        try:
-            from langchain_google_genai import GoogleGenerativeAIEmbeddings
-            return GoogleGenerativeAIEmbeddings(
-                model="models/embedding-001",
-                google_api_key=google_key,
-            )
-        except Exception:
-            pass
-
-    # Local development fallback: available only when sentence-transformers is installed.
-    try:
-        from langchain_community.embeddings import HuggingFaceEmbeddings
-        return HuggingFaceEmbeddings(
-            model_name="sentence-transformers/all-MiniLM-L6-v2",
-            model_kwargs={"device": "cpu"},
-            encode_kwargs={"normalize_embeddings": True},
-        )
-    except ImportError as exc:
-        raise RuntimeError(
-            "No embedding model is available. Add GOOGLE_API_KEY in Hugging Face "
-            "Space secrets, or install sentence-transformers for local offline use."
-        ) from exc
+    return HashEmbeddings()
 
 
 def _get_llm(api_key: Optional[str] = None, provider_override: Optional[str] = None):
