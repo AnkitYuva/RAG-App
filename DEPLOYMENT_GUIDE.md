@@ -95,7 +95,7 @@ Hugging Face Spaces natively hosts Gradio apps with zero configuration:
 6. **Set your API Key Secret**:
    - In your Hugging Face Space, click **Settings** → **Variables and secrets**.
    - Under **Secrets**, click **New secret**:
-     - Key: `GOOGLE_API_KEY` (or `OPENAI_API_KEY` / `GROQ_API_KEY`)
+     - Key: `OPENROUTER_API_KEY`
      - Value: `<your-api-key>`
 7. Your app builds in ~60 seconds and gives you a permanent, live HTTPS URL:
    `https://huggingface.co/spaces/<your-username>/rag-document-assistant`!
@@ -114,7 +114,7 @@ Hugging Face Spaces natively hosts Gradio apps with zero configuration:
    - **Build Command**: `pip install -r requirements.txt`
    - **Start Command**: `python app.py`
 5. Under **Environment Variables**:
-   - Add `GOOGLE_API_KEY` = `your_api_key_here`
+   - Add `OPENROUTER_API_KEY` = `your_openrouter_api_key_here`
    - Add `GRADIO_SERVER_NAME` = `0.0.0.0`
 6. Click **Deploy Web Service**.
 7. Render will build and launch your application at:

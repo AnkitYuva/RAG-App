@@ -1,0 +1,14 @@
+services:
+  rag-assistant:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: sem1-rag-assistant
+    ports:
+      - "7860:7860"
+    env_file:
+      - .env
+    environment:
+      PORT: 7860
+      GRADIO_SERVER_NAME: 0.0.0.0
+    restart: unless-stopped
