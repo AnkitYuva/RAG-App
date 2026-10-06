@@ -190,17 +190,10 @@ def _get_embedding_model(api_key: Optional[str] = None):
     if _is_valid_key(google_key):
         try:
             from langchain_google_genai import GoogleGenerativeAIEmbeddings
-            # text-embedding-004 is current standard; fallback to embedding-001
-            try:
-                return GoogleGenerativeAIEmbeddings(
-                    model="models/text-embedding-004",
-                    google_api_key=google_key,
-                )
-            except Exception:
-                return GoogleGenerativeAIEmbeddings(
-                    model="models/embedding-001",
-                    google_api_key=google_key,
-                )
+            return GoogleGenerativeAIEmbeddings(
+                model="models/embedding-001",
+                google_api_key=google_key,
+            )
         except Exception:
             pass
 
