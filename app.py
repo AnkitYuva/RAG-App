@@ -1,456 +1,353 @@
 """
-app.py
-------
-Main entry point for "Ask My Documents – RAG Assistant".
+Minimal Colab-friendly Gradio RAG app.
 
-This file creates the Gradio web interface and connects:
-  - document_processor.py  (PDF loading + chunking)
-  - rag_engine.py          (embeddings + FAISS + LLM)
-
-Run with:
+Run locally:
     python app.py
-Then open http://127.0.0.1:7860 in your browser.
+
+Run in Colab:
+    !pip install -r requirements.txt
+    !python app.py
 """
 
+import hashlib
+import math
 import os
+import re
 import traceback
-from typing import List, Optional
+from pathlib import Path
+from typing import Dict, List
 
+import google.generativeai as genai
 import gradio as gr
 from dotenv import load_dotenv
+from pypdf import PdfReader
 
 load_dotenv()
 
-import document_processor as dp
-import rag_engine as rag
-
 try:
     import spaces
-    zero_gpu = spaces.GPU
+
+    zero_gpu = spaces.GPU if os.getenv("SPACE_ID") else (lambda fn: fn)
 except Exception:
+
     def zero_gpu(fn):
         return fn
 
 
+CHUNK_SIZE = 900
+CHUNK_OVERLAP = 150
+TOP_K = 4
+EMBED_DIMS = 4096
+
+
 def get_default_api_key() -> str:
-    """Get any pre-configured API key from environment."""
-    return (
-        os.getenv("NVIDIA_API_KEY", "")
-        or os.getenv("GOOGLE_API_KEY", "")
-        or os.getenv("OPENAI_API_KEY", "")
-        or os.getenv("GROQ_API_KEY", "")
-    )
+    return os.getenv("GOOGLE_API_KEY", "")
+
+
+def read_file_text(path: str) -> List[Dict]:
+    file_path = Path(path)
+    suffix = file_path.suffix.lower()
+    docs = []
+
+    if suffix == ".pdf":
+        reader = PdfReader(path)
+        for page_index, page in enumerate(reader.pages):
+            text = page.extract_text() or ""
+            if text.strip():
+                docs.append(
+                    {
+                        "text": text,
+                        "source": file_path.name,
+                        "page": page_index + 1,
+                    }
+                )
+    elif suffix in {".txt", ".md"}:
+        text = file_path.read_text(encoding="utf-8", errors="ignore")
+        if text.strip():
+            docs.append({"text": text, "source": file_path.name, "page": 1})
+    else:
+        raise ValueError(f"Unsupported file type: {file_path.name}")
+
+    return docs
+
+
+def chunk_text(text: str, chunk_size: int, chunk_overlap: int) -> List[str]:
+    text = re.sub(r"\s+", " ", text).strip()
+    if not text:
+        return []
+
+    chunks = []
+    start = 0
+    step = max(1, chunk_size - chunk_overlap)
+
+    while start < len(text):
+        chunk = text[start : start + chunk_size].strip()
+        if chunk:
+            chunks.append(chunk)
+        start += step
+
+    return chunks
+
+
+def embed_text(text: str) -> List[float]:
+    vector = [0.0] * EMBED_DIMS
+    tokens = [token for token in re.findall(r"[A-Za-z0-9]+", text.lower()) if len(token) > 2]
+
+    for token in tokens:
+        digest = hashlib.sha256(token.encode("utf-8")).digest()
+        index = int.from_bytes(digest[:4], "little") % EMBED_DIMS
+        sign = 1.0 if digest[4] % 2 == 0 else -1.0
+        vector[index] += sign
+
+    norm = math.sqrt(sum(value * value for value in vector))
+    if norm:
+        vector = [value / norm for value in vector]
+    return vector
+
+
+def cosine_similarity(a: List[float], b: List[float]) -> float:
+    return sum(x * y for x, y in zip(a, b))
+
+
+def get_file_paths(uploaded_files) -> List[str]:
+    paths = []
+    for item in uploaded_files or []:
+        if isinstance(item, str):
+            paths.append(item)
+        elif hasattr(item, "name"):
+            paths.append(item.name)
+        elif hasattr(item, "path"):
+            paths.append(item.path)
+    return paths
 
 
 @zero_gpu
-def process_documents(uploaded_files, chunk_size: int = 800, chunk_overlap: int = 150, api_key: str = "") -> tuple:
-    """
-    Called when the user clicks 'Process Documents'.
-    Loads PDFs, splits into chunks, and builds FAISS vector store.
-    """
+def process_documents(uploaded_files, chunk_size: int, chunk_overlap: int):
     if not uploaded_files:
-        return (
-            "⚠️ **No files selected.** Please upload at least one PDF file or click 'Load Sample Document'.",
-            False,
-            gr.update(interactive=False),
-        )
-
-    file_paths = []
-    for f in uploaded_files:
-        if hasattr(f, "name"):
-            file_paths.append(f.name)
-        elif isinstance(f, str):
-            file_paths.append(f)
-        elif hasattr(f, "path"):
-            file_paths.append(f.path)
+        return "Please upload at least one PDF, TXT, or Markdown file.", None, gr.update(interactive=False)
 
     try:
-        rag.reset()
+        paths = get_file_paths(uploaded_files)
+        index = []
+        total_pages = 0
 
-        # Step 1: Document loading & chunking
-        chunks, stats = dp.load_and_split_pdfs(
-            file_paths=file_paths,
-            chunk_size=int(chunk_size),
-            chunk_overlap=int(chunk_overlap),
+        for path in paths:
+            pages = read_file_text(path)
+            total_pages += len(pages)
+
+            for page in pages:
+                for chunk in chunk_text(page["text"], int(chunk_size), int(chunk_overlap)):
+                    index.append(
+                        {
+                            "text": chunk,
+                            "source": page["source"],
+                            "page": page["page"],
+                            "embedding": embed_text(chunk),
+                        }
+                    )
+
+        if not index:
+            return "No readable text was found in the uploaded documents.", None, gr.update(interactive=False)
+
+        status = (
+            "Documents processed successfully.\n\n"
+            f"- Files: {len(paths)}\n"
+            f"- Pages/text files: {total_pages}\n"
+            f"- Chunks: {len(index)}"
         )
+        return status, index, gr.update(interactive=True)
 
-        # Step 2: Vector embedding & FAISS store creation
-        rag.build_vector_store(chunks, api_key=api_key.strip() if api_key else None)
-
-        # Step 3: Success stats display
-        status_text = dp.format_processing_stats(stats)
-        return (
-            status_text,
-            True,
-            gr.update(interactive=True),
-        )
-
-    except FileNotFoundError as e:
-        return (f"❌ **File Error:** {e}", False, gr.update(interactive=False))
-    except ValueError as e:
-        return (f"❌ **Validation Error:** {e}", False, gr.update(interactive=False))
-    except RuntimeError as e:
-        return (f"❌ **Processing Error:** {e}", False, gr.update(interactive=False))
-    except Exception as e:
-        tb = traceback.format_exc()
-        return (
-            f"❌ **Unexpected Error:**\n```\n{tb}\n```",
-            False,
-            gr.update(interactive=False),
-        )
+    except Exception:
+        return f"Processing failed:\n\n```\n{traceback.format_exc()}\n```", None, gr.update(interactive=False)
 
 
 @zero_gpu
-def load_sample_document() -> tuple:
-    """Loads the pre-packaged sample syllabus PDF for instant 1-click testing."""
+def load_sample_document():
     sample_path = os.path.abspath("data/sample_documents/AI_Course_Syllabus.pdf")
     if not os.path.exists(sample_path):
-        return (
-            None,
-            "⚠️ Sample file not found. Generating sample documents...",
-            False,
-            gr.update(interactive=False),
+        return None, "Sample document not found.", None, gr.update(interactive=False)
+
+    status, index, ask_update = process_documents([sample_path], CHUNK_SIZE, CHUNK_OVERLAP)
+    return [sample_path], status, index, ask_update
+
+
+def retrieve(question: str, index: List[Dict], top_k: int) -> List[Dict]:
+    query_embedding = embed_text(question)
+    scored = []
+
+    for item in index:
+        scored.append((cosine_similarity(query_embedding, item["embedding"]), item))
+
+    scored.sort(key=lambda pair: pair[0], reverse=True)
+
+    results = []
+    for score, item in scored[:top_k]:
+        result = dict(item)
+        result["score"] = score
+        results.append(result)
+    return results
+
+
+def build_prompt(question: str, sources: List[Dict]) -> str:
+    context_blocks = []
+    for i, source in enumerate(sources, start=1):
+        context_blocks.append(
+            f"[Source {i} | File: {source['source']} | Page: {source['page']}]\n"
+            f"{source['text']}"
         )
 
-    try:
-        rag.reset()
-        chunks, stats = dp.load_and_split_pdfs([sample_path])
-        rag.build_vector_store(chunks)
-        status_text = dp.format_processing_stats(stats)
-        status_text = "🎉 **Sample Document Loaded:** `AI_Course_Syllabus.pdf`\n\n" + status_text
-        return (
-            [sample_path],
-            status_text,
-            True,
-            gr.update(interactive=True),
+    context = "\n\n".join(context_blocks)
+    return f"""You are a document question-answering assistant.
+
+Answer the question using ONLY the document context below.
+If the answer is not present, say: "I could not find this information in the uploaded documents."
+Use citations like [Source 1, Page 2].
+
+DOCUMENT CONTEXT:
+{context}
+
+QUESTION:
+{question}
+
+ANSWER:"""
+
+
+def call_gemini(prompt: str, api_key: str) -> str:
+    key = (api_key or os.getenv("GOOGLE_API_KEY", "")).strip()
+    if not key:
+        raise RuntimeError(
+            "Missing GOOGLE_API_KEY. Add it in the API key box, Colab secrets, .env, "
+            "or Hugging Face Space secrets."
         )
-    except Exception as e:
-        return (
-            None,
-            f"❌ **Error loading sample document:** {e}",
-            False,
-            gr.update(interactive=False),
+
+    genai.configure(api_key=key)
+    model = genai.GenerativeModel("gemini-1.5-flash")
+    response = model.generate_content(prompt)
+    return (response.text or "").strip()
+
+
+def format_sources(sources: List[Dict]) -> str:
+    if not sources:
+        return "No sources retrieved."
+
+    lines = []
+    for i, source in enumerate(sources, start=1):
+        snippet = source["text"][:500]
+        if len(source["text"]) > 500:
+            snippet += "..."
+        lines.append(
+            f"**Source {i}**\n"
+            f"- File: `{source['source']}`\n"
+            f"- Page: {source['page']}\n"
+            f"- Similarity: `{source['score']:.3f}`\n\n"
+            f"> {snippet}"
         )
+    return "\n\n---\n\n".join(lines)
 
 
 @zero_gpu
-def ask_question(
-    question: str,
-    docs_ready: bool,
-    provider: str,
-    api_key: str,
-    prompt_strategy: str,
-    custom_instructions: str,
-    top_k: int,
-) -> tuple:
-    """
-    Called when the user submits a question.
-    Runs similarity retrieval, injects context into the selected prompt strategy,
-    and generates LLM answer.
-    """
-    if not docs_ready or not rag.is_ready():
-        return (
-            "⚠️ **Documents not processed.**\n\n"
-            "Please upload document files and click **'Process Documents'** first.",
-            "",
-            "No prompt assembled yet.",
-        )
+def ask_question(question: str, index, api_key: str, top_k: int):
+    if not index:
+        return "Please upload and process documents first.", "", ""
 
     if not question or not question.strip():
-        return (
-            "⚠️ **Empty question.** Please enter a question to search your documents.",
-            "",
-            "No prompt assembled yet.",
-        )
+        return "Please enter a question.", "", ""
 
     try:
-        answer, sources, assembled_prompt = rag.answer_question(
-            question=question,
-            api_key=api_key.strip() if api_key else None,
-            provider=provider,
-            strategy=prompt_strategy,
-            custom_instructions=custom_instructions,
-            top_k=int(top_k),
-        )
-        sources_text = rag.format_sources(sources)
-        answer_text = f"### 💡 Answer ({prompt_strategy})\n\n{answer}"
-        return answer_text, sources_text, assembled_prompt
-
-    except ValueError as e:
-        return f"⚠️ **Input Error:** {e}", "", ""
-    except RuntimeError as e:
-        return f"❌ **Configuration Notice:**\n\n{e}", "", ""
-    except Exception as e:
-        tb = traceback.format_exc()
-        return f"❌ **Error generating response:**\n```\n{tb}\n```", "", ""
+        sources = retrieve(question.strip(), index, int(top_k))
+        prompt = build_prompt(question.strip(), sources)
+        answer = call_gemini(prompt, api_key)
+        return answer, format_sources(sources), prompt
+    except Exception:
+        return f"Answer generation failed:\n\n```\n{traceback.format_exc()}\n```", "", ""
 
 
-def clear_all() -> tuple:
-    """Reset the application state."""
-    rag.reset()
-    return (
-        None,                                 # file upload
-        "Upload documents above or click **'Load Sample Document'** to begin.",
-        "",                                   # question box
-        "",                                   # answer box
-        "",                                   # sources box
-        "",                                   # prompt inspector
-        False,                                # docs_ready
-        gr.update(interactive=False),         # ask_btn
-    )
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-#  STYLING & LAYOUT
-# ─────────────────────────────────────────────────────────────────────────────
-
-PIPELINE_DIAGRAM = """\
-[User Document: PDF]
-         │
-         ▼
-[PyPDFLoader: Page Extraction]
-         │
-         ▼
-[RecursiveCharacterTextSplitter: Chunks + Overlap]
-         │
-         ▼
-[Embedding Model: Vector Numerical Representation]
-         │
-         ▼
-[FAISS Vector Store: Fast Indexing]
-         │
-  [User Question] ──▶ [Embed Query] ──▶ [Similarity Search (Top-K)]
-                                                     │
-                                                     ▼
-                                            [Context Assembly]
-                                                     │
-                                                     ▼
-                                            [Strict Prompting]
-                                                     │
-                                                     ▼
-                                            [LLM Grounded Answer + Citations]
-"""
+def clear_all():
+    return None, "Upload documents to begin.", None, "", "", "", gr.update(interactive=False)
 
 
 def build_app() -> gr.Blocks:
     with gr.Blocks(title="Ask My Documents - RAG Assistant") as demo:
-        docs_ready = gr.State(False)
+        rag_index = gr.State(None)
 
-        # ── Header & Styles ────────────────────────────────────────────────
         gr.Markdown(
             """
 # Ask My Documents - RAG Assistant
-Upload PDF, text, or Markdown files. Ask questions and get answers grounded in the uploaded documents, with source references.
+Upload documents, process them, ask questions, and get grounded answers with sources.
 """
         )
 
-        # ── Pipeline Overview ──────────────────────────────────────────────
-        with gr.Accordion("ℹ️ System Architecture & Workflow", open=False):
-            gr.Markdown("""
-### Complete RAG Workflow Explained:
-1. **Document Loading (`PyPDFLoader` / Text Loaders)**: Extracts raw text and preserves metadata (source filename and page numbers).
-2. **Text Chunking (`RecursiveCharacterTextSplitter`)**: Splits text at natural paragraph and sentence boundaries with chunk overlap to preserve context across boundaries.
-3. **Embeddings & Vector Store (`FAISS`)**: Transforms chunks into dense vectors and indexes them for high-speed nearest-neighbor search.
-4. **Semantic Retrieval**: Performs similarity search with score to find the Top-K chunks closest in semantic meaning to your query.
-5. **Prompt Design**: Injects retrieved chunks into prompt strategies such as Strict Grounding, Evidence-First, Few-Shot, Executive Briefing, or Custom Persona.
-6. **Grounded Generation (`LLM`)**: The model answers exclusively from the context with verifiable citations.
-""")
-            gr.Markdown(f"```text\n{PIPELINE_DIAGRAM}\n```")
-
-        # ── Settings & Prompt Design ───────────────────────────────────────
-        with gr.Accordion("⚙️ Model, API & Chunking Configuration", open=False):
-            with gr.Row():
-                provider_dropdown = gr.Dropdown(
-                    choices=["Auto-detect", "Google Gemini"],
-                    value="Auto-detect",
-                    label="LLM Provider",
-                    info="Use Auto-detect or Google Gemini with GOOGLE_API_KEY.",
-                )
-                api_key_input = gr.Textbox(
-                    label="API Key (optional if configured in .env)",
-                    placeholder="Enter your API key or leave blank to use .env",
-                    type="password",
-                    value=get_default_api_key(),
-                )
-
-            with gr.Row():
-                chunk_size_slider = gr.Slider(
-                    minimum=200,
-                    maximum=2000,
-                    step=50,
-                    value=800,
-                    label="Chunk Size (Characters)",
-                    info="Maximum length of each text chunk",
-                )
-                chunk_overlap_slider = gr.Slider(
-                    minimum=0,
-                    maximum=400,
-                    step=25,
-                    value=150,
-                    label="Chunk Overlap (Characters)",
-                    info="Overlap between adjacent chunks to maintain context",
-                )
-
-        # ══ PROMPT DESIGN CONTROLS ══════════════════════════════════════════
-        with gr.Accordion("🎯 Prompt Design & Retrieval Controls", open=True):
-            gr.Markdown("""
-Select from **industry-standard prompt engineering patterns** designed to eliminate hallucinations, enforce structured outputs, or provide reasoning traces.
-""")
-            with gr.Row():
-                prompt_strategy_dropdown = gr.Dropdown(
-                    choices=list(rag.PROMPT_STRATEGIES.keys()),
-                    value="Strict Grounding (Anti-Hallucination)",
-                    label="Prompt Engineering Strategy",
-                    info="Controls system persona, reasoning instructions, and output constraints",
-                )
-                top_k_slider = gr.Slider(
-                    minimum=1,
-                    maximum=8,
-                    step=1,
-                    value=4,
-                    label="Top-K Retrieved Chunks",
-                    info="Number of relevant chunks passed as context",
-                )
-
-            custom_instructions_box = gr.Textbox(
-                label="Custom Persona / System Instructions (Active when 'Custom Persona / Prompt' is selected)",
-                placeholder="e.g., You are an Academic Auditor. Provide a strict analysis with bullet points and page citations.",
-                value="You are an expert AI Academic Advisor. Answer the question thoroughly and concisely using only the document context provided.",
-                lines=2,
+        with gr.Accordion("Settings", open=False):
+            api_key = gr.Textbox(
+                label="Google API Key",
+                type="password",
+                value=get_default_api_key(),
+                placeholder="Leave blank if GOOGLE_API_KEY is already configured",
             )
+            with gr.Row():
+                chunk_size = gr.Slider(300, 1500, value=CHUNK_SIZE, step=50, label="Chunk Size")
+                chunk_overlap = gr.Slider(0, 300, value=CHUNK_OVERLAP, step=25, label="Chunk Overlap")
+                top_k = gr.Slider(1, 6, value=TOP_K, step=1, label="Top-K Sources")
 
-        gr.Markdown("---")
+        file_upload = gr.File(
+            label="Upload PDF, TXT, or Markdown Documents",
+            file_types=[".pdf", ".txt", ".md"],
+            file_count="multiple",
+        )
 
-        # ══ STEP 1: Upload Documents ════════════════════════════════════════
-        gr.Markdown("### 📤 Upload & Process Documents")
         with gr.Row():
-            with gr.Column(scale=3):
-                file_upload = gr.File(
-                    label="Upload PDF, TXT, or Markdown Documents",
-                    file_types=[".pdf", ".txt", ".md"],
-                    file_count="multiple",
-                    height=150,
-                )
-            with gr.Column(scale=1):
-                process_btn = gr.Button("Process Documents", variant="primary", size="lg")
-                sample_btn = gr.Button("Load Sample Document", variant="secondary", size="sm")
-                clear_btn = gr.Button("Clear / Reset", variant="secondary", size="sm")
+            process_btn = gr.Button("Process Documents", variant="primary")
+            sample_btn = gr.Button("Load Sample Document")
+            clear_btn = gr.Button("Clear")
 
-        status_box = gr.Markdown(
-            value="Upload documents above or click **'Load Sample Document'** to get started.",
-        )
+        status = gr.Markdown("Upload documents to begin.")
 
-        gr.Markdown("---")
+        question = gr.Textbox(label="Ask a Question", lines=2, placeholder="What is this document about?")
+        ask_btn = gr.Button("Ask", variant="primary", interactive=False)
 
-        # ══ STEP 2: Ask Question ════════════════════════════════════════════
-        gr.Markdown("### 💬 Ask a Question")
-        question_box = gr.Textbox(
-            label="Your Question",
-            placeholder="e.g., What are the prerequisites and grading breakdown for the course?",
-            lines=2,
-            max_lines=4,
-        )
-        ask_btn = gr.Button("Ask Question", variant="primary", size="lg", interactive=False)
+        answer = gr.Markdown(label="Answer")
+        with gr.Accordion("Sources", open=True):
+            sources = gr.Markdown()
+        with gr.Accordion("Prompt", open=False):
+            prompt = gr.Textbox(lines=10, interactive=False)
 
-        gr.Markdown("---")
-
-        # ══ STEP 3: Answers & Citations ═════════════════════════════════════
-        gr.Markdown("### 📋 Answer & Sources")
-        answer_box = gr.Markdown(value="")
-
-        with gr.Accordion("📎 Retrieved Source Documents, Chunks & Similarity Scores", open=True):
-            sources_box = gr.Markdown(value="")
-
-        with gr.Accordion("🔍 Inspect Live Assembled Prompt", open=False):
-            gr.Markdown("_This panel shows the exact prompt assembled by the prompt engine and sent to the LLM:_")
-            prompt_inspector_box = gr.Textbox(
-                label="Full Assembled Prompt Sent to Model",
-                lines=10,
-                max_lines=25,
-                interactive=False,
-            )
-
-        # ── Sample Questions ───────────────────────────────────────────────
-        with gr.Accordion("💡 Suggested Questions", open=True):
-            gr.Markdown("""
-Try these after loading the sample document:
-1. *"What are the prerequisites for this course?"*
-2. *"What is the grading weightage for the Capstone Project and Midterm?"*
-3. *"What are the penalties for late project submissions?"*
-4. *"What is the price of the recommended textbooks?"*
-5. *"What competencies will students develop?"*
-""")
-
-        # ── Event Wiring ───────────────────────────────────────────────────
         process_btn.click(
-            fn=process_documents,
-            inputs=[file_upload, chunk_size_slider, chunk_overlap_slider, api_key_input],
-            outputs=[status_box, docs_ready, ask_btn],
+            process_documents,
+            inputs=[file_upload, chunk_size, chunk_overlap],
+            outputs=[status, rag_index, ask_btn],
         )
-
         sample_btn.click(
-            fn=load_sample_document,
+            load_sample_document,
             inputs=[],
-            outputs=[file_upload, status_box, docs_ready, ask_btn],
+            outputs=[file_upload, status, rag_index, ask_btn],
         )
-
         ask_btn.click(
-            fn=ask_question,
-            inputs=[
-                question_box,
-                docs_ready,
-                provider_dropdown,
-                api_key_input,
-                prompt_strategy_dropdown,
-                custom_instructions_box,
-                top_k_slider,
-            ],
-            outputs=[answer_box, sources_box, prompt_inspector_box],
+            ask_question,
+            inputs=[question, rag_index, api_key, top_k],
+            outputs=[answer, sources, prompt],
         )
-
-        question_box.submit(
-            fn=ask_question,
-            inputs=[
-                question_box,
-                docs_ready,
-                provider_dropdown,
-                api_key_input,
-                prompt_strategy_dropdown,
-                custom_instructions_box,
-                top_k_slider,
-            ],
-            outputs=[answer_box, sources_box, prompt_inspector_box],
+        question.submit(
+            ask_question,
+            inputs=[question, rag_index, api_key, top_k],
+            outputs=[answer, sources, prompt],
         )
-
         clear_btn.click(
-            fn=clear_all,
+            clear_all,
             inputs=[],
-            outputs=[
-                file_upload,
-                status_box,
-                question_box,
-                answer_box,
-                sources_box,
-                prompt_inspector_box,
-                docs_ready,
-                ask_btn,
-            ],
+            outputs=[file_upload, status, rag_index, question, answer, sources, prompt, ask_btn],
         )
 
     return demo
 
 
 if __name__ == "__main__":
-    os.makedirs("data/sample_documents", exist_ok=True)
-    os.makedirs("vectorstore", exist_ok=True)
-
-    server_port = int(os.getenv("PORT", 7860))
-    server_host = os.getenv("GRADIO_SERVER_NAME", "0.0.0.0")
+    port = int(os.getenv("PORT", 7860))
+    running_in_colab = bool(os.getenv("COLAB_RELEASE_TAG"))
 
     app = build_app()
     app.launch(
-        server_name=server_host,
-        server_port=server_port,
-        share=False,
+        server_name="0.0.0.0",
+        server_port=port,
+        share=running_in_colab,
         inbrowser=False,
     )

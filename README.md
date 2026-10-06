@@ -12,6 +12,9 @@ suggested_hardware: zero-a10g
 
 # 📚 Ask My Documents – RAG Assistant & Prompt Engineering System
 
+> **Colab-friendly version:** the main `app.py` is now a minimal Gradio RAG app using only `gradio`, `pypdf`, `google-generativeai`, `python-dotenv`, and `spaces` for Hugging Face ZeroGPU.
+> See [`COLAB_GUIDE.md`](COLAB_GUIDE.md) for the exact Colab cells.
+
 > **Agentic AI – Internal Assessment (30 Marks Practical Assessment)**
 > - **Exercise 1 – RAG Application with UI** (10 Marks)
 > - **Exercise 2 – Professional Prompt Design** (10 Marks)
