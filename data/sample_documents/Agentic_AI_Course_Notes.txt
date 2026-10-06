@@ -1,0 +1,24 @@
+Agentic AI Course Notes
+
+Course Overview
+Agentic AI is the study of AI systems that can plan, use tools, remember context, and take actions toward a goal. Unlike a simple chatbot, an agentic system can break a task into steps, call external tools, check intermediate results, and revise its plan.
+
+Key Topics
+1. Large Language Models: LLMs generate and understand natural language.
+2. Prompt Design: A good prompt gives clear instructions, relevant context, constraints, and the expected output format.
+3. Retrieval-Augmented Generation: RAG combines document search with LLM generation so answers are grounded in uploaded documents.
+4. Tool Use: Agents can call tools such as web search, calculators, databases, APIs, and file readers.
+5. Planning: The agent decides what steps are needed before producing the final output.
+6. Evaluation: Agentic systems are evaluated for correctness, grounding, safety, latency, and usefulness.
+
+RAG Workflow
+The RAG workflow begins with document ingestion. Documents are loaded and converted into text. The text is split into smaller chunks. Each chunk is represented as a searchable vector or feature representation. When a user asks a question, the system retrieves the most relevant chunks and sends them to the LLM as context. The LLM must answer only from that context and show sources.
+
+Why RAG Is Useful
+RAG reduces hallucination because the model is not forced to answer only from memory. It can use private notes, syllabi, manuals, or research papers. RAG is also useful when information changes frequently or is not part of the model training data.
+
+Prompt Design Rules
+A professional prompt should define the assistant role, describe the task, include context, state restrictions, and specify the output format. For document question answering, the prompt should say: answer only from the given context; if the answer is missing, say that it was not found in the uploaded documents.
+
+Assessment Notes
+Students should be able to explain document loading, chunking, retrieval, prompt construction, answer generation, and source display. A working application alone is not enough; the student must explain how and why the system works.

@@ -1,0 +1,29 @@
+Campus Event Policy Demo Document
+
+Purpose
+This document describes rules for organizing student events on campus. It is intended for demonstration of document question answering and RAG retrieval.
+
+Event Registration
+All student events must be registered at least seven working days before the event date. The organizing team must submit the event title, event objective, expected audience size, venue requirement, faculty coordinator name, and budget estimate.
+
+Venue Rules
+Classrooms may be used for events with fewer than 80 participants. The seminar hall must be booked for events with 80 to 250 participants. Outdoor spaces require additional approval from the administration office.
+
+Budget Approval
+Events with a budget below 5,000 rupees can be approved by the faculty coordinator. Events with a budget from 5,000 to 25,000 rupees require approval from the department head. Budgets above 25,000 rupees require approval from the principal.
+
+Attendance and Certificates
+Attendance should be recorded using a registration sheet or approved digital form. Certificates may be issued only after the faculty coordinator verifies participation. Students who leave before the event ends are not eligible for participation certificates.
+
+Code of Conduct
+Participants must follow campus discipline rules. Any damage to college property must be reported immediately. The organizing team is responsible for maintaining cleanliness after the event.
+
+Cancellation Policy
+If an event is cancelled, the organizing team must inform participants at least 24 hours in advance. If the cancellation is due to weather, emergency, or administrative restrictions, the event may be rescheduled without a new registration form.
+
+Sample Questions
+What information is required for event registration?
+When should student events be registered?
+Who approves a budget of 20,000 rupees?
+Can certificates be given to students who leave early?
+What happens if an event is cancelled because of weather?
