@@ -17,6 +17,8 @@ suggested_hardware: zero-a10g
 
 > **Docker version:** run the complete container project with `docker compose up --build -d`. See [`DOCKER_GUIDE.md`](DOCKER_GUIDE.md).
 
+> **Security:** copy `.env.example` to `.env` and add your key locally. The real `.env` file is excluded from Git and Docker image builds.
+
 > **Agentic AI – Internal Assessment (30 Marks Practical Assessment)**
 > - **Exercise 1 – RAG Application with UI** (10 Marks)
 > - **Exercise 2 – Professional Prompt Design** (10 Marks)
